@@ -1,0 +1,178 @@
+import os
+import pandas as pd
+import numpy as np
+from scipy.stats import pearsonr
+import seaborn as sns
+import matplotlib.pyplot as plt
+from statsmodels.nonparametric.smoothers_lowess import lowess
+import scanpy as sc
+from keras.models import Sequential
+from keras.layers import Dense
+from tensorflow.keras.utils import to_categorical
+from sklearn.preprocessing import LabelEncoder
+
+#1,data_cleaning and metadata
+inputpath='D:/Desktop/data/data_8_10'
+rna_data=pd.read_csv(inputpath+'/DNB_combined_data.csv', index_col=0)
+metadata_df=pd.read_csv(inputpath+'/seurat_ramification_sub_meta.csv', index_col=0)
+Bone=["HBA1", "HBA2","HBB","RIOK3","RPL3","SCGB1A1","SOX2","TAOK1","SAA1"]
+Boneplus=["AGR3","CXCL17","NFKBIZ","OLFML3","SFTPA2","SCGB3A1","PARP1","NASP"]
+Brain_distant=["RPL35","S100A8","S100A9","SET","TXNDC17","YWHAE","PSMB6","ACTR3","AKR1C3"]
+Pleural=["CEACAM5","CPM","HILPDA","RAP1B","SERPINA1","SFTPA1"]
+Lung=["CSNK2A1","FKBP2","IGHG4","MCFD2","SEC31A","THOC2","RPS3A","RACK1","EEF1B2","VDAC1","EEF2"]
+
+trajectory_list = [Bone, Boneplus, Brain_distant, Pleural, Lung]
+types = ['bone', 'boneplus', 'lung', 'other_distant', 'pleural']
+
+metadata_df = metadata_df[
+    (metadata_df['bone_ramification'] == 'bone_after_cell') |
+    (metadata_df['boneplus_ramification'] == 'boneplus_after_cell') |
+    (metadata_df['other_distant_ramification'] == 'other_distant_after_cell')|
+    (metadata_df['lung_ramification'] == 'lung_after_cell')|
+    (metadata_df['pleural_ramification'] == 'pleural_after_cell')
+]
+rna_data=rna_data[metadata_df.index]
+cor_gene=flattened_list = [gene for sublist in trajectory_list for gene in sublist]
+
+#2,verify data
+#brain
+#out_data=pd.read_csv(inputpath+'/train/GSM3516671_MSK_LX681_METASTASIS_dense_brain_filter.csv',index_col=0)
+#PRIMARY
+out_data_1=pd.read_csv(inputpath+'/train/GSM3516665_MSK_LX675_PRIMARY_TUMOUR_dense_filter.csv',index_col=0)
+#bone
+out_data_2=pd.read_csv(inputpath+'/train/GSM3516664_MSK_LX666_METASTASIS_dense_bone_filter.csv',index_col=0)
+out_data = pd.merge(out_data_1, out_data_2, left_index=True, right_index=True)
+#filter
+common_genes = list(set(cor_gene) & set(out_data.index))
+out_data=out_data.loc[common_genes]
+background_data=rna_data.loc[common_genes]
+metadata_df=pd.read_csv(inputpath+'/seurat_ramification_sub_meta.csv', index_col=0)
+metadata_df = metadata_df.loc[background_data.T.index]
+result_df = pd.concat([background_data.T, metadata_df], axis=1)
+label = (result_df['other_distant_ramification']
+         .combine_first(result_df['bone_ramification'])
+         .combine_first(result_df['lung_ramification'])
+         .combine_first(result_df['pleural_ramification'])
+         .combine_first(result_df['boneplus_ramification']))
+background_data=background_data.T
+background_data['label'] = label
+
+background_data['label'] = background_data['label'].replace('boneplus_after_cell', 'bone')
+background_data['label'] = background_data['label'].replace('pleural_after_cell', 'lung')
+background_data['label'] = background_data['label'].replace('other_distant_after_cell', 'brain')
+background_data['label'] = background_data['label'].replace('bone_after_cell', 'bone')
+background_data['label'] = background_data['label'].replace('lung_after_cell', 'lung')
+
+#element_counts = background_data['label'].value_counts()
+#element_counts
+
+#3,neural network
+# labeling
+X = background_data.iloc[:, :-1].values
+y = background_data.iloc[:, -1].values
+
+# transform into integer
+label_encoder = LabelEncoder()
+y_integers = label_encoder.fit_transform(y)
+
+# one-hot code
+y_categorical = to_categorical(y_integers)
+
+# network configuration
+input_dim = X.shape[1] 
+num_classes = y_categorical.shape[1] 
+
+# model activation
+model = Sequential()
+model.add(Dense(10, input_dim=input_dim, activation='relu'))#2
+model.add(Dense(5, activation='relu'))#3
+model.add(Dense(num_classes, activation='softmax'))
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.fit(X, y_categorical, epochs=100, batch_size=10)
+
+#4,verification datasets
+test_data=out_data.T
+test_data['label'] = [index.split('_')[0] for index in test_data.index]
+X_test = test_data.iloc[:, :-1].values
+y_test = test_data.iloc[:, -1].values
+y_test_integers = label_encoder.transform(y_test)
+y_test_categorical = to_categorical(y_test_integers)
+loss, accuracy = model.evaluate(X_test, y_test_categorical)
+print("Test Accuracy: {:.2f}%".format(accuracy * 100))
+
+#5,prediction(bone)
+out_data_2=pd.read_csv(inputpath+'/train/GSM3516664_MSK_LX666_METASTASIS_dense_bone_filter.csv',index_col=0)
+out_data_2=out_data_2.loc[common_genes]
+test_data=out_data_2.T
+X_test = test_data.values
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_pred_labels = label_encoder.inverse_transform(y_pred_classes)
+from collections import Counter
+label_counts = Counter(y_pred_labels)
+for label, count in label_counts.items():
+    print(f"Label '{label}': {count} occurrences")
+
+#6,prediction
+test_data=out_data.T
+test_data['label'] = [index.split('_')[0] for index in test_data.index]
+X_test = test_data.iloc[:, :-1].values
+y_test = test_data.iloc[:, -1].values
+y_test_integers = label_encoder.transform(y_test)
+y_test_categorical = to_categorical(y_test_integers)
+y_pred = model.predict(X_test)
+y_pred_classes = np.argmax(y_pred, axis=1)
+y_pred_labels = label_encoder.inverse_transform(y_pred_classes)
+from collections import Counter
+label_counts = Counter(y_pred_labels)
+for label, count in label_counts.items():
+    print(f"Label '{label}': {count} occurrences")
+
+#7,ROC curve
+from sklearn.metrics import roc_curve, auc, precision_score, accuracy_score
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import label_binarize
+# Binarize the labels for multi-class ROC curve
+y_test_binarized = label_binarize(y_test, classes=np.unique(y))
+# Make predictions (probabilities)
+y_pred_prob = model.predict(X_test)
+# calculate accuracy and precision
+precisions = []
+accuracies = []
+y_pred_classes = np.argmax(y_pred_prob, axis=1)
+y_test_classes = np.argmax(y_test_binarized, axis=1)
+# check the existence of each label in every classification
+classes_present = [np.any(y_test_classes == i) for i in range(num_classes)]
+class_names = ['bone', 'brain', 'lung']  # label
+fpr = dict()
+tpr = dict()
+roc_auc = dict()
+for i in range(num_classes):
+    fpr[i], tpr[i], _ = roc_curve(y_test_binarized[:, i], y_pred_prob[:, i])
+    roc_auc[i] = auc(fpr[i], tpr[i])
+#calculate AUC
+plt.figure()
+colors = ['aqua', 'darkorange', 'cornflowerblue', 'green', 'red']
+for i, color in zip(range(num_classes), colors):
+    if not classes_present[i]:
+        continue 
+    y_pred_label = (y_pred_classes == i).astype(int)
+    y_test_label = (y_test_classes == i).astype(int)
+    precision = precision_score(y_test_label, y_pred_label, zero_division=0)
+    accuracy = accuracy_score(y_test_label, y_pred_label)
+    precisions.append(precision)
+    accuracies.append(accuracy)
+    plt.plot(fpr[i], tpr[i], color=color, lw=2,
+             label='{0} (AUC = {1:0.2f}, Precision = {2:0.2f}, Accuracy = {3:0.2f})'
+             ''.format(class_names[i], roc_auc[i], precision, accuracy))
+plt.plot([0, 1], [0, 1], 'k--', lw=2)
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Multi-class ROC with Precision and Accuracy')
+plt.legend(loc="lower right")
+# save
+plt.savefig(inputpath+"/roc_curve.pdf", format='pdf')
+plt.close()
