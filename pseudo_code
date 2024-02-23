@@ -1,0 +1,166 @@
+#this is the working flowing description.
+Set up the working environment and load libraries
+1.1. Set the working directory to "D:/Desktop/Pre-metastatic Niche Data - CAS/".
+1.2. Load required libraries: DNBr, stringr, dplyr, Seurat, monocle3, SingleR.
+
+Data integration
+2.1. Initialize variables
+2.1.1. Define a vector name_vec containing the names of datasets.
+2.1.2. Initialize combined_data as NULL for storing the combined data later.
+2.2. Iterate and process each dataset
+2.2.1. For each name in name_vec, construct the corresponding folder path.
+2.2.2. Read all file paths within the folder.
+2.2.3. Iterate through each file:
+2.2.3.1. Select the data reading method based on specific characters in the filename.
+2.2.3.2. Modify column names by adding dataset name and file label.
+2.2.3.3. Merge the current data with combined_data, filling missing values with 0.
+2.3. Save the processed data
+2.3.1. Save the combined data as RDS and CSV files.
+
+Build the Seurat object
+3.1. Read the combined data.
+3.2. Create an object using Seurat, setting thresholds for minimum cells and minimum features.
+3.3. Calculate mitochondrial gene percentage and add it as metadata.
+3.4. Generate and add vectors for patient and group based on column names into the metadata.
+3.5. Save the Seurat object.
+
+Single-cell data annotation
+4.1. Use HumanPrimaryCellAtlasData as reference data.
+4.2. Perform data annotation with SingleR to identify cancer cells.
+4.3. Add annotation results to the Seurat object's metadata and visualize.
+4.4. Save the annotated Seurat object.
+
+Trajectory analysis
+5.1. Prepare data
+5.1.1. Read the annotated Seurat object.
+5.1.2. Extract expression matrix and metadata to construct a new cell dataset.
+5.2. Data preprocessing and analysis
+5.2.1. Preprocess the dataset, correct for batch effects, and reduce dimensions.
+5.2.2. Mark cells by color based on different metadata and visualize.
+5.3. Cell clustering and trajectory analysis
+5.3.1. Perform cell clustering.
+5.3.2. Visualize clustering results, including visualization by group, patient, and label.
+
+Filter count data
+6.1. From the cds dataset, select cells where partition equals 1 to generate a new cell dataset new_cd.
+
+Marker gene analysis
+7.1. Perform marker gene detection on cds, grouping by partition, using 1000 reference cells, and calculating on 8 cores.
+7.2. From the results, filter genes with an expression ratio not less than 10%.
+7.3. Group by cell group, selecting the top 3 marker genes with the highest pseudo_R2 for each group.
+7.4. Extract unique gene IDs from the filtered results and store them in top_specific_marker_ids.
+7.5. Draw expression graphs for genes specified by top_specific_marker_ids, grouped by partition.
+
+Trajectory plotting
+8.1. Learn cell trajectories using the learn_graph function.
+8.2. Plot trajectories colored by partition, without marking groups, leaf nodes, or branch points.
+8.3. Plot trajectories colored by group, marking leaf nodes and branch points, adjusting label sizes.
+
+Save and load Monocle objects
+9.1. Save cds to a specified directory using the save_monocle_objects function.
+9.2. Load cds from a specified directory using the load_monocle_objects function.
+
+Determine the root node
+10.1. Define a function get_earliest_principal_node to identify the earliest principal node.
+10.2. The function finds cell IDs appearing in the earliest time interval for a given time bin (e.g., "stageIII").
+10.3. Determine the closest vertex as the root node by comparing these cell IDs.
+10.4. Order cells using the order_cells function, taking the output of get_earliest_principal_node as the root node.
+
+Plot trajectory based on pseudotime
+11.1. Plot cell trajectory colored by pseudotime, without marking cell groups, leaf nodes, or branch points.
+11.2. Save the cds object with root node information for subsequent trajectory analysis.
+
+Subset selection and analysis
+12.1. Load cds from previously saved Monocle objects.
+12.2. Manually divide the trajectory into five segments from the interactive interface.
+12.3. Use the choose_graph_segments function to select specific segments of the trajectory, generating cds_sub.
+12.4. Extract count data for the selected trajectory segments into a matrix sub_data.
+12.5. Save sub_data as RDS and CSV files to a specified directory based on group and time label.
+
+DNB (Dynamic Network Biomarker) analysis
+13.1. Set the working directory to "D:/Desktop/Pre-metastatic Niche Data - CAS/".
+13.2. Define the research type as 'bone'.
+13.3. Read data from five time points (or states): data0, data1, data2, data3, data4.
+13.4. Modify column names of each dataset to add prefixes distinguishing different time points.
+13.5. Count the number of columns in each dataset and create a factor vector factor_counts representing time points (or states).
+13.6. Combine all datasets into one large data matrix merged_data.
+13.7. Calculate DNB using the DNBcompute function from the DNBr package, inputting the combined data matrix and the time point factor vector.
+13.8. Filter the top 5 DNBs using the DNBfilter function.
+13.9. Save the calculated and filtered results as RDS files.
+
+Extract and analyze DNB results
+14.1. Read the DNB calculation and filtering results from previously saved RDS files.
+14.2. Extract all DNB scores for a specific group (e.g., "2"), including preprocessing and final results, using the resultAllExtract function.
+14.3. Save the final DNB score results as a CSV file.
+
+DNB score analysis and visualization
+15.1. Extract specific module scores from the filtered DNB results using the ScoreExtract function, e.g., module '1_452'.
+15.2. Visualize the extracted scores, showing and saving (or displaying) the results.
+
+Integrate UMAP coordinates into the Seurat object
+16.1. Extract the UMAP dimension reduction position coordinates umap_position from the cds object.
+16.2. Assign the UMAP coordinates to the Seurat object's reductions[["umap"]]@cell.embeddings attribute, updating the UMAP dimension reduction coordinates in the Seurat object.
+
+Analysis of Gene Expression Over Time
+17.1. Read metadata and RNA sequencing data from the Seurat object.
+17.2. Select specific genes for analysis, including HBA1, HBA2, etc.
+17.3. Extract expression data for the selected genes and transpose it, then combine with metadata to form the dataframe subset_data_df for analysis.
+
+Visualization of Gene Expression Time Series
+18.1. Iterate through the list of selected genes, analyzing each gene in a loop.
+18.2. For each gene, filter data by different tissue types (such as bone, lung, etc.) and plot the expression level changes over pseudotime.
+18.2.1. Use the loess smoothing method to plot the trend of gene expression level changes over pseudotime.
+18.2.2. Plot histograms of cell frequency for each time segment.
+18.2.3. Calculate and plot the derivative of gene expression levels over pseudotime to explore changes in expression rate.
+18.3. Combine the trend graph, frequency histogram, and derivative graph for each gene by tissue type into a composite graph.
+18.4. Save the composite graph as a PDF file, with the filename reflecting the gene name and content of the analysis.
+
+Integration of Analysis Results
+19.1. Through the above steps, a detailed analysis and visualization of the expression dynamics of each selected gene in different tissue types have been conducted.
+19.2. Save the analysis results in PDF format for future reference and presentation.
+
+Analysis Based on Ramification Points
+20.1. Process the metadata of the Seurat object, marking the cell states before, at, and after ramification points for different tissue types (such as bone, boneplus, etc.).
+20.2. Update the Seurat object's metadata to include ramification states information and save the processed Seurat object.
+
+UMAP Visualization of Cell Differentiation States
+21.1. Use the DimPlot function to visualize the differentiation states of each tissue type on UMAP, showing the distribution of cells before, at, and after ramification points.
+
+Differential Expression Analysis Based on Ramification Points
+22.1. Perform differential expression gene analysis on cells before and after ramification points.
+22.1.1. Select cells before and after ramification points and calculate differentially expressed genes.
+22.1.2. Visualize the selected differentially expressed genes with a heatmap, showing changes in expression levels.
+22.2. Perform differential expression gene analysis on cells before, at, and after ramification points.
+22.2.1. Including ramification points, select related cells for differential expression analysis.
+22.2.2. Generate a heatmap to show the differences in gene expression at different states.
+
+Comparative Analysis Between Different Ramification Points
+23.1. Create sub-Seurat objects for ramification points of each tissue type and assign source labels.
+23.2. Merge these sub-Seurat objects into one large Seurat object for subsequent analysis.
+23.3. Normalize and scale the merged Seurat object.
+23.4. Perform differential expression gene analysis on the merged Seurat object to compare gene expression differences between different ramification points.
+23.5. Generate a heatmap to visualize the expression levels of differentially expressed genes between ramification points.
+
+Neural Network Model Training and Prediction
+24.1. Train the neural network model using the extracted features X and the one-hot encoded labels y_categorical.
+24.2. The model includes an input layer, two hidden layers (each with 5 neurons), and an output layer, using the ReLU activation function and softmax output.
+24.3. Use categorical_crossentropy as the loss function, adam optimizer, and train the model for 100 epochs with batches of 10 samples.
+
+Prediction on External Datasets
+25.1. Preprocess the external dataset out_data, converting it to the model input format X_test.
+25.2. Use the trained model to predict X_test, obtaining the probabilities for predicted categories.
+25.3. Take the category with the highest probability as the prediction result, convert to original labels, and count the occurrences of each label.
+
+Drawing ROC Curves
+26.1. Binarize the labels of the test dataset to accommodate the requirements for drawing multi-class ROC curves.
+26.2. Calculate the true positive rate (TPR) and false positive rate (FPR) for each category, along with the area under the ROC curve (AUC).
+26.3. Draw an ROC curve for each category, showing the AUC value for each curve, using different colors to distinguish different categories.
+26.4. Display the drawn ROC curves, including legends and axis labels, to evaluate the classification performance of the model for each category.
+
+Drawing a Sankey Diagram of Actual vs Predicted Labels
+27.1. First, calculate the mapping frequency between actual labels and predicted labels, creating a dataframe label_pred_df containing these two types of labels.
+27.2. Use pd.crosstab to generate a frequency cross-tabulation cross_tab between actual and predicted labels.
+27.3. Iterate through the cross-tab, converting its data into lists of sources, targets, and values needed for the Sankey diagram.
+27.4. Create a Sankey diagram using the Sankey method from plotly.graph_objects, setting attributes for nodes and links, including padding, thickness, line color, and width.
+27.5. Update the layout of the Sankey diagram, setting the title and font size.
+27.6. Save the Sankey diagram as an image file, path inputpath+"/sankey_diagram.png".
