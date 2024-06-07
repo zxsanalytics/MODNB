@@ -1,0 +1,242 @@
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.preprocessing import LabelEncoder
+from keras.utils import to_categorical
+from scipy.spatial.distance import mahalanobis
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.covariance import EmpiricalCovariance
+from sklearn.ensemble import VotingClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import roc_curve, auc, accuracy_score
+
+# data_readin
+inputpath = './data/data_8_10'
+rna_data = pd.read_csv(inputpath + '/seurat_gene_expression_data_back.csv', index_col=0)
+out_data = pd.read_csv(inputpath + '/seurat_gene_expression_data_out.csv', index_col=0)
+metadata_df = pd.read_csv(inputpath + '/seurat_ramification_sub_meta_result.csv', index_col=0)
+# define gene and DNB-related gene lists
+Bone = ["HBA1", "HBA2","HBB","RIOK3","RPL3","SCGB1A1","SOX2","TAOK1","SAA1"]
+Boneplus = ["AGR3","CXCL17","NFKBIZ","OLFML3","SFTPA2","SCGB3A1","PARP1","NASP"]
+Brain_distant = ["RPL35","S100A8","S100A9","SET","TXNDC17","YWHAE","PSMB6","ACTR3","AKR1C3"]
+Pleural = ["CEACAM5","CPM","HILPDA","RAP1B","SERPINA1","SFTPA1"]
+Lung = ["CSNK2A1","FKBP2","IGHG4","MCFD2","SEC31A","THOC2","RPS3A","RACK1","EEF1B2","VDAC1","EEF2"]
+trajectory_list = [Bone, Boneplus, Brain_distant, Pleural, Lung]
+cor_gene = [gene for sublist in trajectory_list for gene in sublist]
+# data filtering
+conditions = [
+    metadata_df['bone_ramification'] == 'bone_after_cell',
+    metadata_df['boneplus_ramification'] == 'boneplus_after_cell',
+    metadata_df['other_distant_ramification'] == 'other_distant_after_cell',
+    metadata_df['lung_ramification'] == 'lung_after_cell',
+    metadata_df['pleural_ramification'] == 'pleural_after_cell']
+condition_counts = sum(conditions)
+metadata_df = metadata_df[condition_counts == 1]
+rna_data = rna_data[metadata_df.index]
+# retrieve the overlapping genes 
+common_genes = list(set(cor_gene) & set(out_data.index))
+out_data = out_data.loc[common_genes]
+# preparing the background datasets
+background_data = rna_data.loc[common_genes]
+metadata_df = metadata_df.loc[background_data.T.index]
+
+result_df = pd.concat([background_data.T, metadata_df], axis=1)
+label = (result_df['pleural_ramification']
+         .combine_first(result_df['boneplus_ramification'])
+         .combine_first(result_df['lung_ramification'])
+         .combine_first(result_df['other_distant_ramification'])
+         .combine_first(result_df['bone_ramification']))
+background_data = background_data.T
+background_data['label'] = label
+background_data['label'] = background_data['label'].replace('boneplus_after_cell', 'bone')
+background_data['label'] = background_data['label'].replace('pleural_after_cell', 'lung')
+background_data['label'] = background_data['label'].replace('other_distant_after_cell', 'brain')
+background_data['label'] = background_data['label'].replace('bone_after_cell', 'bone')
+background_data['label'] = background_data['label'].replace('lung_after_cell', 'lung')
+background_data = background_data[background_data['label'].isin(['bone', 'lung'])]
+
+# feature labeling
+X = background_data.iloc[:, :-1].values
+y = background_data.iloc[:, -1].values
+# data transformation
+label_encoder = LabelEncoder()
+y_integers = label_encoder.fit_transform(y)
+
+
+# creating models 
+rf = RandomForestClassifier(n_estimators=100, random_state=42)
+gb = GradientBoostingClassifier(n_estimators=100, random_state=42)
+xgb = XGBClassifier(n_estimators=100, random_state=42)
+lgbm = LGBMClassifier(n_estimators=100, random_state=42)
+# ensemble_model
+voting_clf = VotingClassifier(estimators=[
+    ('rf', rf), ('gb', gb), ('xgb', xgb), ('lgbm', lgbm)], voting='soft')
+
+X_filtered = X
+y_filtered = y_integers
+
+# cross validation
+scores = cross_val_score(voting_clf, X_filtered, y_filtered, cv=5, scoring='accuracy')
+# print results
+print(f'Cross-Validation Accuracy Scores: {scores}')
+print(f'Mean Accuracy: {np.mean(scores)}')
+
+#visualization of results 
+import matplotlib.pyplot as plt
+
+# cross validation bar plot
+plt.bar(range(1, len(scores) + 1), scores)
+plt.axhline(y=np.mean(scores), color='r', linestyle='--')
+plt.xlabel('Fold Number')
+plt.ylabel('Accuracy')
+plt.title('Cross-Validation Scores per Fold')
+plt.savefig("./crossvalidaiton_barplot.pdf", format='pdf')
+plt.show()
+# Confusion matrix visualization
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.model_selection import StratifiedKFold
+# collect prediction results
+y_true, y_pred = [], []
+skf = StratifiedKFold(n_splits=5, random_state=42, shuffle=True)
+for train_index, test_index in skf.split(X_filtered, y_filtered):
+    X_train, X_test = X_filtered[train_index], X_filtered[test_index]
+    y_train, y_test = y_filtered[train_index], y_filtered[test_index]
+    voting_clf.fit(X_train, y_train)
+    y_pred.extend(voting_clf.predict(X_test))
+    y_true.extend(y_test)
+
+# label transformation
+y_true_labels = label_encoder.inverse_transform(y_true)
+y_pred_labels = label_encoder.inverse_transform(y_pred)
+
+# Confusion matrix calculation and plotting
+cm = confusion_matrix(y_true_labels, y_pred_labels, labels=label_encoder.classes_)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=label_encoder.classes_)
+disp.plot(cmap=plt.cm.Blues)
+plt.title('Confusion Matrix')
+plt.savefig("./Confusion_matrix.pdf", format='pdf')
+plt.show()
+
+# ROC
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+from sklearn.model_selection import StratifiedKFold
+from scipy import interp
+
+# prepare cross-validaiton
+cv = StratifiedKFold(n_splits=5, random_state=42, shuffle=True)
+tprs = []  # true positive list
+aucs = []  # AUC
+mean_fpr = np.linspace(0, 1, 100)  
+
+fig, ax = plt.subplots()
+for i, (train_index, test_index) in enumerate(cv.split(X_filtered, y_filtered)):
+    X_train, X_test = X_filtered[train_index], X_filtered[test_index]
+    y_train, y_test = y_filtered[train_index], y_filtered[test_index]   
+    # training model
+    #voting_clf.fit(X_train, y_train)
+    y_score = voting_clf.predict_proba(X_test)[:, 1]   
+    # ROC calculation
+    fpr, tpr, _ = roc_curve(y_test, y_score)
+    roc_auc = auc(fpr, tpr)
+    aucs.append(roc_auc)
+    ax.plot(fpr, tpr, lw=1, alpha=0.3, label='ROC fold %d (AUC = %0.2f)' % (i+1, roc_auc)) 
+    # 
+    interp_tpr = interp(mean_fpr, fpr, tpr)
+    interp_tpr[0] = 0.0
+    tprs.append(interp_tpr)
+# calculate averages and SD for each folds
+mean_tpr = np.mean(tprs, axis=0)
+mean_tpr[-1] = 1.0
+mean_auc = np.mean(aucs)
+std_auc = np.std(aucs)
+
+# visualiaztion
+ax.plot(mean_fpr, mean_tpr, color='b',
+        label=r'Mean ROC (AUC = %0.2f $\pm$ %0.2f)' % (mean_auc, std_auc),
+        lw=2, alpha=0.8)
+ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='r', label='Chance', alpha=0.8)
+ax.set(xlim=[0, 1], ylim=[0, 1.05], xlabel='False Positive Rate', ylabel='True Positive Rate', title='Receiver Operating Characteristic')
+ax.legend(loc='lower right')
+plt.savefig("./ROC.pdf", format='pdf')
+plt.show()
+
+
+#independent dataset validation
+out_data_1_row = pd.read_csv(inputpath + '/seurat_gene_expression_data_out_primary_out2.csv', index_col=0)
+out_data_2_row = pd.read_csv(inputpath + '/seurat_gene_expression_data_out_bone_out3.csv', index_col=0)
+#out_data_3_row = pd.read_csv(inputpath + '/seurat_gene_expression_data_out_brain_out1.csv', index_col=0)
+#  
+common_genes = background_data.columns[:-1]  
+out_data_1 = out_data_1_row.loc[common_genes].T
+out_data_2 = out_data_2_row.loc[common_genes].T
+#out_data_3 = out_data_3_row.loc[common_genes].T
+out_data_1['label'] = 'lung'
+out_data_2['label'] = 'bone'
+#out_data_3['label'] = 'brain'
+# label transformation
+out_data_1['label'] = label_encoder.transform(out_data_1['label'])
+out_data_2['label'] = label_encoder.transform(out_data_2['label'])
+# feature extraction
+X_out1 = out_data_1.iloc[:, :-1].values
+y_out1 = out_data_1.iloc[:, -1].values
+X_out2 = out_data_2.iloc[:, :-1].values
+y_out2 = out_data_2.iloc[:, -1].values
+
+
+# generate prediction results
+y_pred_out1 = voting_clf.predict(X_out1)
+y_pred_out2 = voting_clf.predict(X_out2)
+
+# label transformation
+y_true_labels_out1 = label_encoder.inverse_transform(y_out1)
+y_pred_labels_out1 = label_encoder.inverse_transform(y_pred_out1)
+y_true_labels_out2 = label_encoder.inverse_transform(y_out2)
+y_pred_labels_out2 = label_encoder.inverse_transform(y_pred_out2)
+
+# visualiaztion
+def plot_confusion_matrix(y_true, y_pred, title,filename):
+    cm = confusion_matrix(y_true, y_pred, labels=label_encoder.classes_)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=label_encoder.classes_)
+    disp.plot(cmap=plt.cm.Blues)
+    plt.title(title)
+    plt.savefig(filename, format='pdf')
+    plt.show()
+
+# visualiaztion
+plot_confusion_matrix(y_true_labels_out1, y_pred_labels_out1, "Confusion Matrix for primary_out",
+                      "./5_Confusion Matrix for primary_out.pdf")
+plot_confusion_matrix(y_true_labels_out2, y_pred_labels_out2, "Confusion Matrix for bone_out",
+                      "./6_Confusion Matrix for bone_out.pdf")
+
+# combine datasets
+combined_X = np.vstack((X_out1, X_out2))
+combined_y = np.hstack((y_out1, y_out2))
+
+# calculate prediction rate 
+y_score = voting_clf.predict_proba(combined_X)[:, 1]
+
+# calculate ROC curve
+fpr, tpr, _ = roc_curve(combined_y, y_score)
+roc_auc = auc(fpr, tpr)
+
+# visualiaztion
+plt.figure()
+plt.plot(fpr, tpr, color='b', lw=2, label='ROC curve (AUC = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], linestyle='--', color='r', lw=2, label='Chance')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc='lower right')
+plt.savefig("./7_ROC_out.pdf", format='pdf')
+plt.show()
