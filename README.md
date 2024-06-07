@@ -4,3 +4,7 @@ The original file was uploaded on 5 Jan, 2024. All the scripts in this repositor
 Code designer&maintainer: Xiaoshen Zhangy; Kai Xiao.
 
 Authors of the project: Xiaoshen Zhang, Kai Xiao, Yaokai Wen, Fengying Wu, Guanghui Gao, Luonan Chen, Caicun Zhou
+
+
+*Update info*
+2024-06-07 Added a new ensemble_learning_model for cross-validating the results. Refined neural_networks code.
